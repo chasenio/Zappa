@@ -561,7 +561,7 @@ class ZappaCLI:
 
         # Hand it off
         if command == "deploy":  # pragma: no cover
-            self.deploy(self.vargs["zip"], self.vargs["docker_image_uri"])
+            self.deploy(self.vargs["zip"], self.vargs["docker_image_uri"], self.vargs["update"])
         if command == "package":  # pragma: no cover
             self.package(self.vargs["output"])
         if command == "template":  # pragma: no cover
