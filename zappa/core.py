@@ -1092,6 +1092,7 @@ class Zappa:
         layers=None,
         concurrency=None,
         docker_image_uri=None,
+        image_uri_command=None,
     ):
         """
         Given a bucket and key (or a local path) of a valid Lambda-zip,
@@ -1131,6 +1132,9 @@ class Zappa:
             kwargs["PackageType"] = "Zip"
 
         if docker_image_uri:
+            kwargs["ImageConfig"] = {
+                "Command": image_uri_command,
+            }
             kwargs["Code"] = {"ImageUri": docker_image_uri}
             # default is ZIP. override to Image for container support
             kwargs["PackageType"] = "Image"
