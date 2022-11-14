@@ -1121,7 +1121,8 @@ class Zappa:
             Publish=publish,
             VpcConfig=vpc_config,
             DeadLetterConfig=dead_letter_config,
-            Environment={"Variables": aws_environment_variables},
+            # environment value must be a string
+            Environment={"Variables": {k:str(v) for k,v in aws_environment_variables.items()}},
             KMSKeyArn=aws_kms_key_arn,
             TracingConfig={"Mode": "Active" if self.xray_tracing else "PassThrough"},
             Layers=layers,
