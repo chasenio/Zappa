@@ -1306,7 +1306,7 @@ class Zappa:
             # Append keys that are remote but not in settings file
             for key, value in lambda_aws_environment_variables.items():
                 if key not in aws_environment_variables:
-                    aws_environment_variables[key] = str(value)
+                    aws_environment_variables[key] = value
 
         kwargs = {
             "FunctionName": function_name,
@@ -1316,7 +1316,8 @@ class Zappa:
             "MemorySize": memory_size,
             "EphemeralStorage": ephemeral_storage,
             "VpcConfig": vpc_config,
-            "Environment": {"Variables": aws_environment_variables},
+            # environment value must be a string
+            "Environment": {"Variables": {k:str(v) for k,v in aws_environment_variables.items()}},
             "KMSKeyArn": aws_kms_key_arn,
             "TracingConfig": {"Mode": "Active" if self.xray_tracing else "PassThrough"},
         }
