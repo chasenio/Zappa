@@ -1306,7 +1306,7 @@ class Zappa:
             # Append keys that are remote but not in settings file
             for key, value in lambda_aws_environment_variables.items():
                 if key not in aws_environment_variables:
-                    aws_environment_variables[key] = value
+                    aws_environment_variables[key] = str(value)
 
         kwargs = {
             "FunctionName": function_name,
