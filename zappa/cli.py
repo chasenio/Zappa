@@ -753,55 +753,54 @@ class ZappaCLI:
                 + click.style("update", bold=True)
                 + "?"
             )
-        elif deployed_versions and update:
-            # TODO miss update no_upload
-            self.update(source_zip=source_zip, docker_image_uri=docker_image_uri)
-        else:
-            if not source_zip and not docker_image_uri:
-                # Make sure we're in a venv.
-                self.check_venv()
+        if deployed_versions and update:
+            return self.update(source_zip=source_zip, docker_image_uri=docker_image_uri)
 
-                # Execute the prebuild script
-                if self.prebuild_script:
-                    self.execute_prebuild_script()
+        if not source_zip and not docker_image_uri:
+            # Make sure we're in a venv.
+            self.check_venv()
 
-                # Create the Lambda Zip
-                self.create_package()
-                self.callback("zip")
+            # Execute the prebuild script
+            if self.prebuild_script:
+                self.execute_prebuild_script()
 
-                # Upload it to S3
+            # Create the Lambda Zip
+            self.create_package()
+            self.callback("zip")
+
+            # Upload it to S3
+            success = self.zappa.upload_to_s3(
+                self.zip_path,
+                self.s3_bucket_name,
+                disable_progress=self.disable_progress,
+            )
+            if not success:  # pragma: no cover
+                raise ClickException("Unable to upload to S3. Quitting.")
+
+            # If using a slim handler, upload it to S3 and tell lambda to use this slim handler zip
+            if self.stage_config.get("slim_handler", False):
+                # https://github.com/Miserlou/Zappa/issues/510
                 success = self.zappa.upload_to_s3(
-                    self.zip_path,
+                    self.handler_path,
                     self.s3_bucket_name,
                     disable_progress=self.disable_progress,
                 )
                 if not success:  # pragma: no cover
-                    raise ClickException("Unable to upload to S3. Quitting.")
+                    raise ClickException("Unable to upload handler to S3. Quitting.")
 
-                # If using a slim handler, upload it to S3 and tell lambda to use this slim handler zip
-                if self.stage_config.get("slim_handler", False):
-                    # https://github.com/Miserlou/Zappa/issues/510
-                    success = self.zappa.upload_to_s3(
-                        self.handler_path,
-                        self.s3_bucket_name,
-                        disable_progress=self.disable_progress,
-                    )
-                    if not success:  # pragma: no cover
-                        raise ClickException("Unable to upload handler to S3. Quitting.")
+                # Copy the project zip to the current project zip
+                current_project_name = "{0!s}_{1!s}_current_project.tar.gz".format(self.api_stage, self.project_name)
+                success = self.zappa.copy_on_s3(
+                    src_file_name=self.zip_path,
+                    dst_file_name=current_project_name,
+                    bucket_name=self.s3_bucket_name,
+                )
+                if not success:  # pragma: no cover
+                    raise ClickException("Unable to copy the zip to be the current project. Quitting.")
 
-                    # Copy the project zip to the current project zip
-                    current_project_name = "{0!s}_{1!s}_current_project.tar.gz".format(self.api_stage, self.project_name)
-                    success = self.zappa.copy_on_s3(
-                        src_file_name=self.zip_path,
-                        dst_file_name=current_project_name,
-                        bucket_name=self.s3_bucket_name,
-                    )
-                    if not success:  # pragma: no cover
-                        raise ClickException("Unable to copy the zip to be the current project. Quitting.")
-
-                    handler_file = self.handler_path
-                else:
-                    handler_file = self.zip_path
+                handler_file = self.handler_path
+            else:
+                handler_file = self.zip_path
 
             # Fixes https://github.com/Miserlou/Zappa/issues/613
             try:
@@ -840,22 +839,21 @@ class ZappaCLI:
                     kwargs["bucket"] = self.s3_bucket_name
                     kwargs["s3_key"] = handler_file
 
-                self.lambda_arn = self.zappa.create_lambda_function(**kwargs)
+            self.lambda_arn = self.zappa.create_lambda_function(**kwargs)
 
-            # Schedule events for this deployment
-            self.schedule()
+        # Schedule events for this deployment
+        self.schedule()
 
-            endpoint_url = ""
-            deployment_string = click.style("Deployment complete", fg="green", bold=True) + "!"
+        deployment_string = click.style("Deployment complete", fg="green", bold=True) + "!"
 
-            if self.use_alb:
-                kwargs = dict(
-                    lambda_arn=self.lambda_arn,
-                    lambda_name=self.lambda_name,
-                    alb_vpc_config=self.alb_vpc_config,
-                    timeout=self.timeout_seconds,
-                )
-                self.zappa.deploy_lambda_alb(**kwargs)
+        if self.use_alb:
+            kwargs = dict(
+                lambda_arn=self.lambda_arn,
+                lambda_name=self.lambda_name,
+                alb_vpc_config=self.alb_vpc_config,
+                timeout=self.timeout_seconds,
+            )
+            self.zappa.deploy_lambda_alb(**kwargs)
 
             if self.use_apigateway:
                 # Create and configure the API Gateway
@@ -870,53 +868,53 @@ class ZappaCLI:
                     endpoint_configuration=self.endpoint_configuration,
                 )
 
-                self.zappa.update_stack(
-                    self.lambda_name,
-                    self.s3_bucket_name,
-                    wait=True,
-                    disable_progress=self.disable_progress,
+            self.zappa.update_stack(
+                self.lambda_name,
+                self.s3_bucket_name,
+                wait=True,
+                disable_progress=self.disable_progress,
+            )
+
+            api_id = self.zappa.get_api_id(self.lambda_name)
+
+            # Add binary support
+            if self.binary_support:
+                self.zappa.add_binary_support(api_id=api_id, cors=self.cors)
+
+            # Add payload compression
+            if self.stage_config.get("payload_compression", True):
+                self.zappa.add_api_compression(
+                    api_id=api_id,
+                    min_compression_size=self.stage_config.get("payload_minimum_compression_size", 0),
                 )
 
-                api_id = self.zappa.get_api_id(self.lambda_name)
+            # Deploy the API!
+            endpoint_url = self.deploy_api_gateway(api_id)
+            deployment_string = deployment_string + ": {}".format(endpoint_url)
 
-                # Add binary support
-                if self.binary_support:
-                    self.zappa.add_binary_support(api_id=api_id, cors=self.cors)
+            # Create/link API key
+            if self.api_key_required:
+                if self.api_key is None:
+                    self.zappa.create_api_key(api_id=api_id, stage_name=self.api_stage)
+                else:
+                    self.zappa.add_api_stage_to_api_key(api_key=self.api_key, api_id=api_id, stage_name=self.api_stage)
 
-                # Add payload compression
-                if self.stage_config.get("payload_compression", True):
-                    self.zappa.add_api_compression(
-                        api_id=api_id,
-                        min_compression_size=self.stage_config.get("payload_minimum_compression_size", 0),
-                    )
+            if self.stage_config.get("touch", True):
+                self.zappa.wait_until_lambda_function_is_updated(function_name=self.lambda_name)
+                self.touch_endpoint(endpoint_url)
 
-                # Deploy the API!
-                endpoint_url = self.deploy_api_gateway(api_id)
-                deployment_string = deployment_string + ": {}".format(endpoint_url)
+        # Finally, delete the local copy our zip package
+        if not source_zip and not docker_image_uri:
+            if self.stage_config.get("delete_local_zip", True):
+                self.remove_local_zip()
 
-                # Create/link API key
-                if self.api_key_required:
-                    if self.api_key is None:
-                        self.zappa.create_api_key(api_id=api_id, stage_name=self.api_stage)
-                    else:
-                        self.zappa.add_api_stage_to_api_key(api_key=self.api_key, api_id=api_id, stage_name=self.api_stage)
+        # Remove the project zip from S3.
+        if not source_zip and not docker_image_uri:
+            self.remove_uploaded_zip()
 
-                if self.stage_config.get("touch", True):
-                    self.zappa.wait_until_lambda_function_is_updated(function_name=self.lambda_name)
-                    self.touch_endpoint(endpoint_url)
+        self.callback("post")
 
-            # Finally, delete the local copy our zip package
-            if not source_zip and not docker_image_uri:
-                if self.stage_config.get("delete_local_zip", True):
-                    self.remove_local_zip()
-
-            # Remove the project zip from S3.
-            if not source_zip and not docker_image_uri:
-                self.remove_uploaded_zip()
-
-            self.callback("post")
-
-            click.echo(deployment_string)
+        click.echo(deployment_string)
 
     def update(self, source_zip=None, no_upload=False, docker_image_uri=None):
         """

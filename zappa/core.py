@@ -1146,6 +1146,8 @@ class Zappa:
             kwargs["Code"] = {"ZipFile": local_zip}
         else:
             kwargs["Code"] = {"S3Bucket": bucket, "S3Key": s3_key}
+        # waiting role available
+        self.wait_role_available(self.credentials_arn)
         response = self.lambda_client.create_function(**kwargs)
         resource_arn = response["FunctionArn"]
         version = response["Version"]
@@ -3320,3 +3322,17 @@ class Zappa:
     @staticmethod
     def service_from_arn(arn):
         return arn.split(":")[2]
+
+    def wait_role_available(self, role_arn: str, timeout: Optional[int] = 30):
+        logger.info(f"Waiting for role {role_arn} to be available")
+        # wait for role to be created, 因为创建角色后立即使用会报错 botocore.errorfactory.InvalidParameterValueException: An error occurred (InvalidParameterValueException) when calling the CreateFunction operation: The role defined for the function cannot be assumed by Lambda.
+        time.sleep(3)
+        expire_time = time.time() + timeout
+        while time.time() < expire_time:
+            role = self.iam_client.get_role(RoleName=role_arn.split("/")[-1])
+            logger.info(f"Role {role_arn} role: {role}")
+            if role:
+                logger.info(f"Role {role_arn} is available")
+                break
+            logger.info("Waiting for role to be available...")
+            time.sleep(1)
