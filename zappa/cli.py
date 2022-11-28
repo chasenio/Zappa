@@ -843,6 +843,8 @@ class ZappaCLI:
 
         # Schedule events for this deployment
         self.schedule()
+        # cognito events for this deployment
+        self.update_cognito_triggers()
 
         deployment_string = click.style("Deployment complete", fg="green", bold=True) + "!"
 
@@ -1250,6 +1252,7 @@ class ZappaCLI:
             lambda_configs = set()
             for trigger in triggers:
                 lambda_configs.add(trigger["source"].split("_")[0])
+            print(f"Updating cognito triggers for {user_pool} with {lambda_configs}")
             self.zappa.update_cognito(self.lambda_name, user_pool, lambda_configs, self.lambda_arn)
 
     def schedule(self):
