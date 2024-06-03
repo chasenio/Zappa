@@ -1117,7 +1117,6 @@ class Zappa:
             Description=description,
             Timeout=timeout,
             MemorySize=memory_size,
-            EphemeralStorage=ephemeral_storage,
             Publish=publish,
             VpcConfig=vpc_config,
             DeadLetterConfig=dead_letter_config,

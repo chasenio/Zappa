@@ -802,42 +802,42 @@ class ZappaCLI:
             else:
                 handler_file = self.zip_path
 
-            # Fixes https://github.com/Miserlou/Zappa/issues/613
-            try:
-                self.lambda_arn = self.zappa.get_lambda_function(function_name=self.lambda_name)
-            except botocore.client.ClientError:
-                # Register the Lambda function with that zip as the source
-                # You'll also need to define the path to your lambda_handler code.
-                kwargs = dict(
-                    handler=self.lambda_handler,
-                    description=self.lambda_description,
-                    vpc_config=self.vpc_config,
-                    dead_letter_config=self.dead_letter_config,
-                    timeout=self.timeout_seconds,
-                    memory_size=self.memory_size,
-                    ephemeral_storage=self.ephemeral_storage,
-                    runtime=self.runtime,
-                    aws_environment_variables=self.aws_environment_variables,
-                    aws_kms_key_arn=self.aws_kms_key_arn,
-                    use_alb=self.use_alb,
-                    layers=self.layers,
-                    concurrency=self.lambda_concurrency,
-                )
-                kwargs["function_name"] = self.lambda_name
-                if docker_image_uri:
-                    kwargs["docker_image_uri"] = docker_image_uri
-                    kwargs["image_uri_command"] = [self.lambda_handler]
-                elif source_zip and source_zip.startswith("s3://"):
-                    bucket, key_name = parse_s3_url(source_zip)
-                    kwargs["bucket"] = bucket
-                    kwargs["s3_key"] = key_name
-                elif source_zip and not source_zip.startswith("s3://"):
-                    with open(source_zip, mode="rb") as fh:
-                        byte_stream = fh.read()
-                    kwargs["local_zip"] = byte_stream
-                else:
-                    kwargs["bucket"] = self.s3_bucket_name
-                    kwargs["s3_key"] = handler_file
+        # Fixes https://github.com/Miserlou/Zappa/issues/613
+        try:
+            self.lambda_arn = self.zappa.get_lambda_function(function_name=self.lambda_name)
+        except botocore.client.ClientError:
+            # Register the Lambda function with that zip as the source
+            # You'll also need to define the path to your lambda_handler code.
+            kwargs = dict(
+                handler=self.lambda_handler,
+                description=self.lambda_description,
+                vpc_config=self.vpc_config,
+                dead_letter_config=self.dead_letter_config,
+                timeout=self.timeout_seconds,
+                memory_size=self.memory_size,
+                ephemeral_storage=self.ephemeral_storage,
+                runtime=self.runtime,
+                aws_environment_variables=self.aws_environment_variables,
+                aws_kms_key_arn=self.aws_kms_key_arn,
+                use_alb=self.use_alb,
+                layers=self.layers,
+                concurrency=self.lambda_concurrency,
+            )
+            kwargs["function_name"] = self.lambda_name
+            if docker_image_uri:
+                kwargs["docker_image_uri"] = docker_image_uri
+                kwargs["image_uri_command"] = [self.lambda_handler]
+            elif source_zip and source_zip.startswith("s3://"):
+                bucket, key_name = parse_s3_url(source_zip)
+                kwargs["bucket"] = bucket
+                kwargs["s3_key"] = key_name
+            elif source_zip and not source_zip.startswith("s3://"):
+                with open(source_zip, mode="rb") as fh:
+                    byte_stream = fh.read()
+                kwargs["local_zip"] = byte_stream
+            else:
+                kwargs["bucket"] = self.s3_bucket_name
+                kwargs["s3_key"] = handler_file
 
             self.lambda_arn = self.zappa.create_lambda_function(**kwargs)
 
