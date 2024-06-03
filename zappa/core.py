@@ -1317,7 +1317,6 @@ class Zappa:
             "Description": description,
             "Timeout": timeout,
             "MemorySize": memory_size,
-            "EphemeralStorage": ephemeral_storage,
             "VpcConfig": vpc_config,
             # environment value must be a string
             "Environment": {"Variables": {k:str(v) for k,v in aws_environment_variables.items()}},
