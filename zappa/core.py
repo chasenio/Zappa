@@ -1092,6 +1092,7 @@ class Zappa:
         layers=None,
         concurrency=None,
         docker_image_uri=None,
+        image_uri_command=None,
     ):
         """
         Given a bucket and key (or a local path) of a valid Lambda-zip,
@@ -1116,11 +1117,11 @@ class Zappa:
             Description=description,
             Timeout=timeout,
             MemorySize=memory_size,
-            EphemeralStorage=ephemeral_storage,
             Publish=publish,
             VpcConfig=vpc_config,
             DeadLetterConfig=dead_letter_config,
-            Environment={"Variables": aws_environment_variables},
+            # environment value must be a string
+            Environment={"Variables": {k:str(v) for k,v in aws_environment_variables.items()}},
             KMSKeyArn=aws_kms_key_arn,
             TracingConfig={"Mode": "Active" if self.xray_tracing else "PassThrough"},
             Layers=layers,
@@ -1131,6 +1132,9 @@ class Zappa:
             kwargs["PackageType"] = "Zip"
 
         if docker_image_uri:
+            kwargs["ImageConfig"] = {
+                "Command": image_uri_command,
+            }
             kwargs["Code"] = {"ImageUri": docker_image_uri}
             # default is ZIP. override to Image for container support
             kwargs["PackageType"] = "Image"
@@ -1142,6 +1146,8 @@ class Zappa:
             kwargs["Code"] = {"ZipFile": local_zip}
         else:
             kwargs["Code"] = {"S3Bucket": bucket, "S3Key": s3_key}
+        # waiting role available
+        self.wait_role_available(self.credentials_arn)
         response = self.lambda_client.create_function(**kwargs)
         resource_arn = response["FunctionArn"]
         version = response["Version"]
@@ -1310,9 +1316,9 @@ class Zappa:
             "Description": description,
             "Timeout": timeout,
             "MemorySize": memory_size,
-            "EphemeralStorage": ephemeral_storage,
             "VpcConfig": vpc_config,
-            "Environment": {"Variables": aws_environment_variables},
+            # environment value must be a string
+            "Environment": {"Variables": {k:str(v) for k,v in aws_environment_variables.items()}},
             "KMSKeyArn": aws_kms_key_arn,
             "TracingConfig": {"Mode": "Active" if self.xray_tracing else "PassThrough"},
         }
@@ -2165,7 +2171,8 @@ class Zappa:
                         value[lckey] = LambdaConfig[lckey]
                 print("value", value)
                 description_kwargs[key] = value
-        if "LambdaConfig" not in description_kwargs:
+        # if dont have lambda config, add it
+        if "LambdaConfig" not in description_kwargs or not description_kwargs["LambdaConfig"]:
             description_kwargs["LambdaConfig"] = LambdaConfig
         if "TemporaryPasswordValidityDays" in description_kwargs["Policies"]["PasswordPolicy"]:
             description_kwargs["AdminCreateUserConfig"].pop("UnusedAccountValidityDays", None)
@@ -3315,3 +3322,17 @@ class Zappa:
     @staticmethod
     def service_from_arn(arn):
         return arn.split(":")[2]
+
+    def wait_role_available(self, role_arn: str, timeout: Optional[int] = 30):
+        logger.info(f"Waiting for role {role_arn} to be available")
+        # wait for role to be created, 因为创建角色后立即使用会报错 botocore.errorfactory.InvalidParameterValueException: An error occurred (InvalidParameterValueException) when calling the CreateFunction operation: The role defined for the function cannot be assumed by Lambda.
+        time.sleep(3)
+        expire_time = time.time() + timeout
+        while time.time() < expire_time:
+            role = self.iam_client.get_role(RoleName=role_arn.split("/")[-1])
+            logger.info(f"Role {role_arn} role: {role}")
+            if role:
+                logger.info(f"Role {role_arn} is available")
+                break
+            logger.info("Waiting for role to be available...")
+            time.sleep(1)

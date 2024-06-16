@@ -212,6 +212,7 @@ class ZappaCLI:
         group.add_argument("-a", "--app_function", help="The WSGI application function.")
         group.add_argument("-s", "--settings_file", help="The path to a Zappa settings file.")
         group.add_argument("-q", "--quiet", action="store_true", help="Silence all output.")
+        group.add_argument("--update", action="store_true", help="if already deployed go to update.")
         # https://github.com/Miserlou/Zappa/issues/407
         # Moved when 'template' command added.
         # Fuck Terraform.
@@ -560,7 +561,7 @@ class ZappaCLI:
 
         # Hand it off
         if command == "deploy":  # pragma: no cover
-            self.deploy(self.vargs["zip"], self.vargs["docker_image_uri"])
+            self.deploy(self.vargs["zip"], self.vargs["docker_image_uri"], self.vargs["update"])
         if command == "package":  # pragma: no cover
             self.package(self.vargs["output"])
         if command == "template":  # pragma: no cover
@@ -711,7 +712,7 @@ class ZappaCLI:
             with open(template_file, "r") as out:
                 print(out.read())
 
-    def deploy(self, source_zip=None, docker_image_uri=None):
+    def deploy(self, source_zip=None, docker_image_uri=None, update: bool = False):
         """
         Package your project, upload it to S3, register the Lambda function
         and create the API Gateway routes.
@@ -744,7 +745,7 @@ class ZappaCLI:
 
         # Make sure this isn't already deployed.
         deployed_versions = self.zappa.get_lambda_function_versions(self.lambda_name)
-        if len(deployed_versions) > 0:
+        if deployed_versions and not update:
             raise ClickException(
                 "This application is "
                 + click.style("already deployed", fg="red")
@@ -752,6 +753,8 @@ class ZappaCLI:
                 + click.style("update", bold=True)
                 + "?"
             )
+        if deployed_versions and update:
+            return self.update(source_zip=source_zip, docker_image_uri=docker_image_uri)
 
         if not source_zip and not docker_image_uri:
             # Make sure we're in a venv.
@@ -823,6 +826,7 @@ class ZappaCLI:
             kwargs["function_name"] = self.lambda_name
             if docker_image_uri:
                 kwargs["docker_image_uri"] = docker_image_uri
+                kwargs["image_uri_command"] = [self.lambda_handler]
             elif source_zip and source_zip.startswith("s3://"):
                 bucket, key_name = parse_s3_url(source_zip)
                 kwargs["bucket"] = bucket
@@ -839,8 +843,9 @@ class ZappaCLI:
 
         # Schedule events for this deployment
         self.schedule()
+        # cognito events for this deployment
+        self.update_cognito_triggers()
 
-        endpoint_url = ""
         deployment_string = click.style("Deployment complete", fg="green", bold=True) + "!"
 
         if self.use_alb:
@@ -852,18 +857,18 @@ class ZappaCLI:
             )
             self.zappa.deploy_lambda_alb(**kwargs)
 
-        if self.use_apigateway:
-            # Create and configure the API Gateway
-            self.zappa.create_stack_template(
-                lambda_arn=self.lambda_arn,
-                lambda_name=self.lambda_name,
-                api_key_required=self.api_key_required,
-                iam_authorization=self.iam_authorization,
-                authorizer=self.authorizer,
-                cors_options=self.cors,
-                description=self.apigateway_description,
-                endpoint_configuration=self.endpoint_configuration,
-            )
+            if self.use_apigateway:
+                # Create and configure the API Gateway
+                self.zappa.create_stack_template(
+                    lambda_arn=self.lambda_arn,
+                    lambda_name=self.lambda_name,
+                    api_key_required=self.api_key_required,
+                    iam_authorization=self.iam_authorization,
+                    authorizer=self.authorizer,
+                    cors_options=self.cors,
+                    description=self.apigateway_description,
+                    endpoint_configuration=self.endpoint_configuration,
+                )
 
             self.zappa.update_stack(
                 self.lambda_name,
@@ -1247,6 +1252,7 @@ class ZappaCLI:
             lambda_configs = set()
             for trigger in triggers:
                 lambda_configs.add(trigger["source"].split("_")[0])
+            print(f"Updating cognito triggers for {user_pool} with {lambda_configs}")
             self.zappa.update_cognito(self.lambda_name, user_pool, lambda_configs, self.lambda_arn)
 
     def schedule(self):
